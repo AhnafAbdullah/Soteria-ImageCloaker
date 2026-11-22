@@ -35,7 +35,7 @@ def write(name, cells):
 CONFIG = code(r"""
 # ---- edit these ----
 REPO_URL   = "https://github.com/AhnafAbdullah/Soteria-ImageCloaker.git"   # "" = copy from Drive
-BRANCH     = "master"
+BRANCH     = "main"
 DRIVE_ROOT = "/content/drive/MyDrive/soteria"   # runs, data tar and (optionally) code live here
 # Private repo: add a Colab secret GITHUB_TOKEN. FLUX VAE: add HF_TOKEN.
 """)
