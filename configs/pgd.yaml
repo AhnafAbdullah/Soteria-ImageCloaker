@@ -1,0 +1,16 @@
+# Phase-2 gate: per-image PGD+EOT on 200 held-out images.
+# Run twice: eps=0.03137 (8/255) and eps=0.06275 (16/255), with distinct out_dir.
+image_size: 256
+eps: 0.03137
+vae: [sd15]
+clip: [vit_b16_laion]
+face: [arcface_ir101]
+ghost_std: 0.03
+
+pgd_steps: 100
+pgd_alpha_frac: 0.05
+pgd_images: 200
+pgd_batch: 8
+
+data_root: /content/data/prepared
+out_dir: /content/drive/MyDrive/soteria/pgd/eps8

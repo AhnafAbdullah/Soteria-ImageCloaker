@@ -1,0 +1,18 @@
+# 300-step check that the whole loop runs and the loss moves (~20-30 min on a T4).
+image_size: 256
+eps: 0.03137
+vae: [sd15]
+clip: [vit_b16_laion]
+face: [arcface_ir101]
+
+batch_size: 8
+steps: 300
+warmup_steps: 50
+curriculum_frac: 0.2
+log_every: 10
+val_every: 100
+ckpt_every: 100
+budget_min: 40
+
+data_root: /content/data/prepared
+out_dir: /content/drive/MyDrive/soteria/runs/smoke
