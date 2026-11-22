@@ -1,0 +1,21 @@
+# Soteria training stack. Colab ships torch/torchvision; install the rest with
+#   pip install -r requirements.txt
+# Locally (CPU smoke tests), install torch first from the PyTorch index.
+torch>=2.3
+torchvision
+diffusers>=0.30
+transformers
+accelerate
+safetensors
+huggingface_hub
+open_clip_torch>=2.24
+timm
+segmentation-models-pytorch>=0.3.3
+kornia>=0.7.2
+lpips
+pyyaml
+pandas
+pillow
+tqdm
+tensorboard
+pytest

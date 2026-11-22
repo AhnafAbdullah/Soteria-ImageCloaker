@@ -1,0 +1,12 @@
+[project]
+name = "soteria"
+version = "0.1.0"
+description = "Feed-forward adversarial cloaks against image-editing, semantic and face-ID models"
+requires-python = ">=3.10"
+
+[tool.setuptools]
+packages = ["soteria"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

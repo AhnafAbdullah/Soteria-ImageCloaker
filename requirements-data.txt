@@ -1,0 +1,4 @@
+# Only needed for scripts/prepare_data.py (landmark detection, run once).
+insightface>=0.7.3
+onnxruntime-gpu
+kaggle
