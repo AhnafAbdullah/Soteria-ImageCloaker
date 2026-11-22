@@ -68,7 +68,13 @@ they are reported as "unseen pipeline, seen encoder".
   and API are not written yet.
 - `platform_scale` / `platform_q` in the config are placeholders until the
   WhatsApp / Instagram round-trip calibration replaces them.
-- Stretch items from the plan (surrogate ensemble beyond one per family,
-  mid-layer feature losses, M-Attack-style targeted loss, YCbCr low-frequency
-  δ, UNet SDS loss) are not implemented. The ensemble only needs extra keys
-  in the config lists.
+- Stretch items from the plan are not implemented yet. In priority order:
+  1. BlurGuard-style per-region blur of δ, plus a spectral-naturalness loss
+     (NeurIPS 2025).
+  2. Surrogate ensemble beyond one per family. This only needs extra keys in
+     the config lists.
+  3. DCT-domain cloak head (DCT-Shield, ICCV 2025).
+  4. ImageProtector-style refusal loss on Qwen2-VL (ACL 2026).
+  5. Mid-layer feature losses and an M-Attack-style targeted loss.
+  6. UNet SDS loss.
+- Purification evaluation must include Noisy Upscaling (Hönig et al., 2025).
