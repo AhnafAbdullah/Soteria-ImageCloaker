@@ -34,6 +34,24 @@ from .metrics import protection_metrics
 from .surrogates import load_surrogates
 
 
+def stratified_indices(sources: pd.Series, n: int) -> list[int]:
+    """Pick n rows that keep the split's source mix (e.g. 300:100 -> 150:50 of 200).
+
+    The eval split is stored in manifest order (all FFHQ rows, then all COCO),
+    so taking the first n would test faces only. Each source contributes its
+    first rows in proportion to its share; sizes are rounded by largest
+    remainder so they sum to exactly n.
+    """
+    counts = sources.value_counts(sort=False)
+    n = min(n, len(sources))
+    exact = counts / counts.sum() * n
+    take = exact.astype(int)
+    for src in (exact - take).sort_values(ascending=False).index[: n - int(take.sum())]:
+        take[src] += 1
+    picked = [i for src, k in take.items() for i in sources.index[sources == src][:k]]
+    return sorted(picked)
+
+
 def pgd_cloak(x, has_face, landmarks, criterion, eot, cfg, use_amp: bool) -> torch.Tensor:
     bound = cfg.eps * texture_mask(x, cfg.mask_min)
     alpha = cfg.eps * cfg.pgd_alpha_frac
@@ -66,7 +84,9 @@ def main(argv=None):
     (out_dir / "images").mkdir(parents=True, exist_ok=True)
 
     ds = CloakDataset(cfg.data_root, "eval", cfg.image_size)
-    ds = Subset(ds, range(min(cfg.pgd_images, len(ds))))
+    picked = stratified_indices(ds.df.source, cfg.pgd_images)
+    print("PGD images by source:", ds.df.source.iloc[picked].value_counts().to_dict(), flush=True)
+    ds = Subset(ds, picked)
     loader = DataLoader(ds, batch_size=cfg.pgd_batch, shuffle=False, num_workers=cfg.num_workers)
 
     surrogates = load_surrogates(cfg, device)

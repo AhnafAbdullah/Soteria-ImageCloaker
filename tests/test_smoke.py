@@ -204,6 +204,16 @@ def test_train_runs_and_resumes(cfg, dataset, tmp_path, monkeypatch):
     assert len(pd.read_csv(out / "log.csv")) >= 5
 
 
+def test_pgd_subset_keeps_source_mix():
+    # Manifest order: every FFHQ eval row before every COCO one.
+    sources = pd.Series(["ffhq"] * 300 + ["coco"] * 100)
+    picked = pgd.stratified_indices(sources, 200)
+    assert len(picked) == len(set(picked)) == 200
+    assert sources[picked].value_counts().to_dict() == {"ffhq": 150, "coco": 50}
+    assert len(pgd.stratified_indices(sources, 7)) == 7          # rounding still sums to n
+    assert len(pgd.stratified_indices(sources, 1000)) == 400     # capped at the split size
+
+
 def test_pgd_runs(cfg, dataset, tmp_path, monkeypatch):
     _patch(monkeypatch, pgd)
     out = tmp_path / "pgd"
