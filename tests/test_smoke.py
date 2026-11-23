@@ -155,6 +155,34 @@ def test_align_follows_translation():
     assert torch.allclose(align_faces(x, lm), x[..., 30:142, 50:162], atol=1e-4)
 
 
+def test_align_works_under_autocast():
+    # PGD / training run under AMP; SVD and det have no fp16/bf16 kernels.
+    x = torch.rand(2, 3, 256, 256)
+    lm = (ARCFACE_TEMPLATE + torch.tensor([50.0, 30.0])).expand(2, -1, -1)
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        out = align_faces(x, lm)
+    assert out.dtype == torch.float32
+    assert torch.allclose(out, align_faces(x, lm))
+
+
+def test_loss_backprops_under_autocast(cfg):
+    # CPU bf16 autocast stands in for CUDA fp16: same op lists, catches
+    # dtype-only crashes that the fp32 tests above cannot.
+    sur = tiny_surrogates(cfg, "cpu")
+    crit = CloakLoss(cfg, sur, TinyLPIPS())
+    x = torch.rand(2, 3, 64, 64)
+    delta = torch.zeros_like(x, requires_grad=True)
+    lm = (ARCFACE_TEMPLATE * (40 / 112) + 12).expand(2, -1, -1)
+    for seed in range(10):
+        random.seed(seed)
+        x_cloak = (x + delta).clamp(0, 1)
+        x_aug, crop = EOT(cfg)(x_cloak, 1.0)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            loss, logs, _ = crit(x, x_cloak, x_aug, crop, torch.tensor([True, False]), lm)
+        (grad,) = torch.autograd.grad(loss, delta)
+        assert "loss_face" in logs and torch.isfinite(grad).all()
+
+
 def test_crop_moves_landmarks_with_image():
     lm = torch.tensor([[[100.0, 60.0]] * 5])
     crop = Crop(x0=0.25, y0=0.25, w=0.5, h=0.5)       # 256 px image -> 128 px crop at (64, 64)

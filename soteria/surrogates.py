@@ -149,19 +149,25 @@ def align_faces(x: torch.Tensor, landmarks: torch.Tensor, size: int = 112) -> to
     landmarks: (B, 5, 2) in pixel coordinates of x (pixel centres at integers,
     the cv2 / detector convention). The warp is fixed per image, so gradients
     flow to x through grid_sample.
+
+    Runs in fp32 with autocast off: under AMP the matmuls would drop to fp16,
+    and SVD / det / inv have no fp16 kernels (and 5-point geometry should not
+    be fitted at fp16 precision anyway). The face net after it still uses AMP.
     """
     b, _, h, w = x.shape
-    template = ARCFACE_TEMPLATE.to(x.device) * (size / 112)
-    a, t = similarity_transform(landmarks.float(), template.expand(b, -1, -1))
-    a_inv = torch.linalg.inv(a)
-    to_norm = torch.diag(x.new_tensor([2 / w, 2 / h])).float()
-    half = size / 2
-    lin = to_norm @ a_inv * half
-    centre = torch.full_like(t, half - 0.5)
-    off = (to_norm @ a_inv @ (centre - t).unsqueeze(-1)).squeeze(-1) + x.new_tensor([1 / w - 1, 1 / h - 1])
-    theta = torch.cat([lin, off.unsqueeze(-1)], dim=-1)
-    grid = F.affine_grid(theta, (b, 3, size, size), align_corners=False)
-    return F.grid_sample(x.float(), grid, mode="bilinear", padding_mode="border", align_corners=False)
+    with torch.autocast(x.device.type, enabled=False):
+        template = ARCFACE_TEMPLATE.to(x.device) * (size / 112)
+        a, t = similarity_transform(landmarks.float(), template.expand(b, -1, -1))
+        a_inv = torch.linalg.inv(a)
+        to_norm = torch.diag(torch.tensor([2 / w, 2 / h], device=x.device))
+        half = size / 2
+        lin = to_norm @ a_inv * half
+        centre = torch.full_like(t, half - 0.5)
+        off = (to_norm @ a_inv @ (centre - t).unsqueeze(-1)).squeeze(-1) \
+            + torch.tensor([1 / w - 1, 1 / h - 1], device=x.device)
+        theta = torch.cat([lin, off.unsqueeze(-1)], dim=-1)
+        grid = F.affine_grid(theta, (b, 3, size, size), align_corners=False)
+        return F.grid_sample(x.float(), grid, mode="bilinear", padding_mode="border", align_corners=False)
 
 
 def conv3x3(cin, cout, stride=1):
