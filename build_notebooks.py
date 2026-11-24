@@ -156,6 +156,42 @@ for run in ("eps8", "eps16"):
     print(f"== {run}: {s['sec_per_image']:.1f} s/image")
     display(pd.DataFrame(s["by_method"]).round(4))
 """),
+    md(r"""
+## Ablation: is the VAE term starved, or just hard? (8/255, 64 images, ~27 min each)
+
+In the baseline, CLIP and face are broken at 8/255 but the VAE ratio only
+falls 0.985 → 0.897 after JPEG.
+
+- **vae_only** turns the CLIP and face terms off. It is the most the VAE can
+  move at 8/255 under this EOT. If it also stalls near 0.85, the VAE
+  objective itself is the problem, not the balance between terms.
+- **rebalanced** keeps all three, but stops the CLIP / face terms pulling once
+  an image is past an unrelated photo / a stranger (`clip_floor=0.3`,
+  `face_floor=-0.1`, from the surrogate check: 0.425 and -0.002), and gives
+  the VAE 4x weight. Success = VAE ratio near the vae_only level while CLIP
+  and face stay below their floors.
+
+The 64 images are the first of the 200 above, so the last cell compares
+all three on exactly the same images.
+"""),
+    code(r"""
+!python -m soteria.pgd --config configs/pgd.yaml eps=0.03137 pgd_images=64 w_clip=0 w_face=0 out_dir={DRIVE_ROOT}/pgd/abl_vae_only
+"""),
+    code(r"""
+!python -m soteria.pgd --config configs/pgd.yaml eps=0.03137 pgd_images=64 clip_floor=0.3 face_floor=-0.1 w_vae=4 out_dir={DRIVE_ROOT}/pgd/abl_rebalanced
+"""),
+    code(r"""
+import pandas as pd
+runs = {"baseline": "eps8", "vae_only": "abl_vae_only", "rebalanced": "abl_rebalanced"}
+dfs = {name: pd.read_csv(f"{DRIVE_ROOT}/pgd/{d}/metrics.csv") for name, d in runs.items()}
+same = set(dfs["vae_only"]["index"])
+cols = [c for c in dfs["baseline"].columns if c.startswith("jpeg75/") and not c.endswith("_shift")]
+rows = {"clean": dfs["baseline"].query("method == 'clean'")}
+rows.update({name: df.query("method == 'pgd'") for name, df in dfs.items()})
+table = pd.DataFrame({name: df[df["index"].isin(same)][cols + ["lpips", "psnr"]].mean() for name, df in rows.items()})
+print(f"{len(same)} images, after a real JPEG q75 round trip (lower = better protection)")
+display(table.round(4))
+"""),
 ])
 
 

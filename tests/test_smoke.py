@@ -165,6 +165,26 @@ def test_align_works_under_autocast():
     assert torch.allclose(out, align_faces(x, lm))
 
 
+def test_similarity_floor_stops_gradient(cfg):
+    sur = tiny_surrogates(cfg, "cpu")
+    x = torch.rand(2, 3, 64, 64)
+    lm = (ARCFACE_TEMPLATE * (40 / 112) + 12).expand(2, -1, -1)
+    has_face = torch.tensor([True, False])
+
+    def grad_norm(**overrides):
+        c = Config(**{**cfg.to_dict(), "w_vae": 0.0, "ghost_std": 0.0, **overrides})
+        delta = (torch.rand_like(x) - 0.5) * 0.01
+        delta.requires_grad_(True)
+        x_cloak = (x + delta).clamp(0, 1)
+        loss, logs, _ = CloakLoss(c, sur, TinyLPIPS())(x, x_cloak, x_cloak, Crop(), has_face, lm)
+        assert {"clip_cos", "face_cos"} <= logs.keys()
+        return torch.autograd.grad(loss, delta)[0].abs().sum()
+
+    assert grad_norm() > 0                                         # default -1: no floor
+    assert grad_norm(clip_floor=1.5, face_floor=1.5) == 0          # every image past its floor
+    assert grad_norm(clip_floor=1.5) > 0 and grad_norm(face_floor=1.5) > 0
+
+
 def test_loss_backprops_under_autocast(cfg):
     # CPU bf16 autocast stands in for CUDA fp16: same op lists, catches
     # dtype-only crashes that the fp32 tests above cannot.

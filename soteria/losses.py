@@ -8,6 +8,10 @@ L(G) = w_vae * L_vae + w_clip * L_clip + w_face * L_face + w_lpips * hinge(LPIPS
 - L_clip, L_face: cosine similarity between the embedding of T(x') and that
   of the clean x. Minimising it pushes the cloaked photo away from its own
   semantics / identity.
+- clip_floor / face_floor: per-image cosine below which that term stops
+  pulling (clamp_min, zero gradient). Once a photo already looks like an
+  unrelated image / a stranger, its share of the budget can go to the other
+  terms instead. -1 = no floor.
 - The face term only covers images that have a detected face.
 
 Each call samples one surrogate per family (the stochastic ensemble), and the
@@ -72,7 +76,9 @@ class CloakLoss:
             clip = chosen["clip"]
             with torch.no_grad(), clip.clean():
                 e_clean = clip(x)
-            terms["clip"] = cfg.w_clip * F.cosine_similarity(clip(x_aug), e_clean, dim=-1).mean()
+            cos = F.cosine_similarity(clip(x_aug), e_clean, dim=-1)
+            terms["clip"] = cfg.w_clip * cos.clamp_min(cfg.clip_floor).mean()
+            logs["clip_cos"] = cos.mean().detach()
 
         if "face" in chosen and cfg.w_face > 0 and bool(has_face.any()):
             face, idx = chosen["face"], has_face.nonzero().squeeze(1)
@@ -81,7 +87,9 @@ class CloakLoss:
                 f_clean = face(x[idx], landmarks=lm)
             lm_aug = crop.apply_to_landmarks(lm, w, h)
             f_adv = face(x_aug[idx], landmarks=lm_aug)
-            terms["face"] = cfg.w_face * F.cosine_similarity(f_adv, f_clean, dim=-1).mean()
+            cos = F.cosine_similarity(f_adv, f_clean, dim=-1)
+            terms["face"] = cfg.w_face * cos.clamp_min(cfg.face_floor).mean()
+            logs["face_cos"] = cos.mean().detach()
 
         lp = self.lpips(x_cloak.float() * 2 - 1, x.float() * 2 - 1).flatten()
         terms["lpips"] = cfg.w_lpips * F.relu(lp - cfg.lpips_budget).mean()

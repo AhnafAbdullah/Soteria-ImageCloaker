@@ -44,6 +44,11 @@ class Config:
     w_vae: float = 1.0
     w_clip: float = 1.0
     w_face: float = 1.0
+    # Cosine below which the CLIP / face term stops pulling (-1 = never).
+    # Reference levels from scripts/check_surrogates.py on FFHQ eval faces:
+    # other face photos 0.425 (CLIP), other people -0.002 (ArcFace).
+    clip_floor: float = -1.0
+    face_floor: float = -1.0
     w_lpips: float = 10.0
     lpips_budget: float = 0.05
 
