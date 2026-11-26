@@ -103,15 +103,29 @@ def find_inputs(pattern: str, base: Path = KAGGLE_INPUT, max_depth: int = 5) -> 
     return hits
 
 
-def find_input_dir(name_part: str, base: Path = KAGGLE_INPUT) -> Path | None:
-    """First folder under base whose name contains name_part (an attached dataset)."""
+def find_input_dir(*name_parts: str, base: Path = KAGGLE_INPUT) -> Path | None:
+    """Shallowest folder under base whose name contains any of name_parts,
+    ignoring case (an attached dataset; Kaggle's mount layout varies)."""
     if not base.is_dir():
         return None
+    parts = [n.lower() for n in name_parts]
     for depth in range(4):
         for p in sorted(base.glob("*/" * depth + "*")):
-            if p.is_dir() and name_part in p.name:
+            if p.is_dir() and any(n in p.name.lower() for n in parts):
                 return p
     return None
+
+
+def describe_inputs(base: Path = KAGGLE_INPUT, max_depth: int = 3, max_lines: int = 40) -> str:
+    """Folders under base with their entry counts, for error messages."""
+    if not base.is_dir():
+        return f"{base} does not exist (nothing attached)"
+    lines = []
+    for depth in range(max_depth):
+        for p in sorted(base.glob("*/" * depth + "*")):
+            if p.is_dir() and len(lines) < max_lines:
+                lines.append(f"  {p}  ({sum(1 for _ in p.iterdir())} entries)")
+    return "\n".join(lines) or f"{base} is empty (nothing attached)"
 
 
 def unpack(tar: Path, dest: Path) -> Path:

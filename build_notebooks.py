@@ -116,10 +116,10 @@ from pathlib import Path
 sh = get_ipython().system            # same as "!", but usable inside if-blocks
 RAW = Path("/tmp/raw")
 if PLATFORM == "kaggle":
-    FFHQ = rt.find_input_dir("flickrfaceshq")
+    FFHQ = rt.find_input_dir("flickrfaceshq", "ffhq")
     if FFHQ is None:
-        raise RuntimeError("Attach FFHQ-256 first: Add Input > search "
-                           "'flickrfaceshq-dataset-nvidia-resized-256px' (by xhlulu)")
+        raise RuntimeError("No FFHQ input found. Add Input > search 'flickrfaceshq-dataset-nvidia-resized-256px' "
+                           "(by xhlulu), then rerun. Attached inputs right now:\n" + rt.describe_inputs())
 else:
     FFHQ = RAW / "ffhq"
     if not FFHQ.is_dir():

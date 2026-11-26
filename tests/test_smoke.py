@@ -329,8 +329,13 @@ def test_restore_run_from_input(tmp_path):
 
 def test_find_input_dir(tmp_path):
     (tmp_path / "datasets" / "xhlulu" / "flickrfaceshq-dataset-nvidia-resized-256px").mkdir(parents=True)
-    assert rt.find_input_dir("flickrfaceshq", tmp_path).name.startswith("flickrfaceshq")
-    assert rt.find_input_dir("nothing-like-this", tmp_path) is None
+    assert rt.find_input_dir("flickrfaceshq", base=tmp_path).name.startswith("flickrfaceshq")
+    assert rt.find_input_dir("nothing-like-this", base=tmp_path) is None
+    (tmp_path / "Other" / "FFHQ-256").mkdir(parents=True)
+    assert rt.find_input_dir("nothing-like-this", "ffhq", base=tmp_path).name == "FFHQ-256"  # any part, any case
+    listing = rt.describe_inputs(tmp_path)
+    assert "flickrfaceshq-dataset-nvidia-resized-256px" in listing and "entries" in listing
+    assert "nothing attached" in rt.describe_inputs(tmp_path / "missing")
 
 
 class FakeEditor:
