@@ -8,22 +8,30 @@ round trips. Proposal: `i233012_i233018_Project_Proposal.pdf`.
 
 **Random seed: `42`**, applied everywhere through `soteria.config.seed_everything`.
 
-## Run order (Colab, T4)
+## Run order (Colab or Kaggle, T4)
 
 | Notebook | What it does | Time |
 |---|---|---|
-| `colab/01_data.ipynb` | FFHQ-256 + COCO val2017 → 256 px, landmarks, fixed eval split, tar on Drive | ~30–45 min, once |
-| `colab/02_pgd.ipynb` | surrogate sanity checks, PGD baseline at 8/255 and 16/255 (the go/no-go gate), VAE ablation, SD1.5 img2img edit check | ~2.5 h + 50 min + 30 min |
+| `colab/01_data.ipynb` | FFHQ-256 + COCO val2017 → 256 px, landmarks, fixed eval split, `prepared.tar` | ~30–45 min, once per platform |
+| `colab/02_pgd.ipynb` | surrogate sanity checks, PGD baseline at 8/255 and 16/255 (the go/no-go gate), VAE ablation, SD1.5 img2img edit check | ~2.5 h + 50 min + 30 min (edit check alone: ~1 h if it must make its own cloaks) |
 | `colab/03_train.ipynb` | 300-step smoke run (measures speed, projects the main run), progress viewer, main 20k-step run (resumable) | ~20 min + ~20 GPU-h (projected from PGD speed; the smoke run measures it) |
 
-Every code cell in 02 and 03 is self-contained: it mounts Drive, pulls the
-code, installs requirements and unpacks the data as needed (seconds when
-already done; `soteria/colab.py`). After a disconnect, rerun only the cell you
-need. Runs, checkpoints and data live under `MyDrive/soteria`; the training
-cell resumes from `runs/<RUN_NAME>/last.pt`, refuses to resume with a changed
-loss config, and keeps `status.json`, `log.csv` and `val.csv` there. Give each
-person and each experiment its own `RUN_NAME`. A private fork needs a Colab
-secret `GITHUB_TOKEN`.
+Every code cell is self-contained: it detects Colab or Kaggle, pulls the
+code, installs requirements and finds or unpacks the data (seconds when
+already done; `soteria/runtime.py`). After a disconnect, rerun only the cell
+you need. Give each person and each experiment its own `RUN_NAME`; the
+training cell refuses to resume with a changed loss config.
+
+| | Colab | Kaggle |
+|---|---|---|
+| Results (`ROOT`) | Drive `MyDrive/soteria` | `/kaggle/working/soteria`, kept only by **Save Version → Save & Run All** |
+| Data | `ROOT/data/prepared.tar` | attach the 01_data output (Add Input → Your Work) |
+| FFHQ for 01 | downloaded with `kaggle.json` | attach `xhlulu/flickrfaceshq-dataset-nvidia-resized-256px` |
+| Resume training | `ROOT/runs/<RUN_NAME>/last.pt` on Drive | attach the previous version's output; its run folder is copied back |
+| Session budget | 330 min | 660 min |
+| Secrets (`HF_TOKEN`, `GITHUB_TOKEN`) | Colab secrets | Add-ons → Secrets |
+
+Kaggle also needs Settings → Accelerator **GPU T4 x2** and Internet **On**.
 
 ## Layout
 
@@ -40,7 +48,7 @@ soteria/
   train.py        AMP, EMA, resume, time budget, TensorBoard
   pgd.py          per-image PGD+EOT baseline with the same objective
   infer.py        cloak one photo at any size (optionally pre-resized to the platform size)
-  colab.py        Colab runtime setup shared by every notebook cell
+  runtime.py      notebook setup for Colab and Kaggle, shared by every cell
   eval/edit.py    SD1.5 img2img edit check: clean vs cloaked edits, same seed, with controls
 configs/          base_256.yaml, smoke.yaml, pgd.yaml
 scripts/          prepare_data.py, check_surrogates.py

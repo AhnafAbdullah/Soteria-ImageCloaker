@@ -17,7 +17,8 @@ import torch.nn.functional as F
 from PIL import Image
 from torch import nn
 
-from soteria import colab, pgd, train
+from soteria import pgd, train
+from soteria import runtime as rt
 from soteria.eval import edit
 from soteria.augment import EOT, Crop, real_jpeg
 from soteria.config import Config
@@ -278,19 +279,58 @@ def test_csv_append_keeps_columns(tmp_path):
     assert list(pd.read_csv(p).step) == [1, 2]
 
 
-def test_restore_data_from_tar(tmp_path):
+def _make_tar(path: Path, tmp_path: Path) -> None:
     src = tmp_path / "src" / "prepared"
-    src.mkdir(parents=True)
+    src.mkdir(parents=True, exist_ok=True)
     (src / "manifest.csv").write_text("path\na.png\nb.png\n")
-    (tmp_path / "drive" / "data").mkdir(parents=True)
-    with tarfile.open(tmp_path / "drive" / "data" / "prepared.tar", "w") as t:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(path, "w") as t:
         t.add(src, arcname="prepared")
-    dest = tmp_path / "local"
-    assert colab.restore_data(tmp_path / "drive", dest) == dest / "prepared"
+
+
+def test_restore_data_colab_style(tmp_path):
+    # Colab: prepared.tar in the results folder (Drive), no Kaggle inputs.
+    _make_tar(tmp_path / "drive" / "data" / "prepared.tar", tmp_path)
+    dest, no_inputs = tmp_path / "local", tmp_path / "no_inputs"
+    assert rt.restore_data(tmp_path / "drive", dest, no_inputs) == dest / "prepared"
     assert (dest / "prepared" / "manifest.csv").exists()
-    colab.restore_data(tmp_path / "drive", dest)                     # second call: no-op
+    assert rt.restore_data(tmp_path / "drive", dest, no_inputs) == dest / "prepared"   # second call: no-op
     with pytest.raises(FileNotFoundError, match="01_data"):
-        colab.restore_data(tmp_path / "nowhere", tmp_path / "empty")
+        rt.restore_data(tmp_path / "nowhere", tmp_path / "empty", no_inputs)
+
+
+def test_restore_data_kaggle_style(tmp_path):
+    # Kaggle: an attached notebook output holds prepared.tar a few folders down.
+    inputs = tmp_path / "input"
+    _make_tar(inputs / "notebooks" / "me" / "soteria-01-data" / "soteria" / "data" / "prepared.tar", tmp_path)
+    dest = tmp_path / "local"
+    assert rt.restore_data(tmp_path / "working", dest, inputs) == dest / "prepared"
+    # An already unpacked prepared/ folder in an input is used in place.
+    unpacked = inputs / "some-dataset" / "prepared"
+    unpacked.mkdir(parents=True)
+    (unpacked / "manifest.csv").write_text("path\na.png\n")
+    assert rt.restore_data(tmp_path / "working", tmp_path / "fresh", inputs) == unpacked
+
+
+def test_restore_run_from_input(tmp_path):
+    inputs, run = tmp_path / "input", tmp_path / "working" / "runs" / "base_256"
+    saved = inputs / "soteria-03-train" / "soteria" / "runs" / "base_256"
+    saved.mkdir(parents=True)
+    (saved / "last.pt").write_bytes(b"ckpt")
+    (saved / "log.csv").write_text("step\n1\n")
+    rt.restore_run(run, inputs)
+    assert (run / "last.pt").read_bytes() == b"ckpt" and (run / "log.csv").exists()
+    (run / "last.pt").write_bytes(b"newer")
+    rt.restore_run(run, inputs)                                      # a local checkpoint wins
+    assert (run / "last.pt").read_bytes() == b"newer"
+    rt.restore_run(tmp_path / "working" / "runs" / "other", inputs)  # nothing saved: no-op
+    assert not (tmp_path / "working" / "runs" / "other").exists()
+
+
+def test_find_input_dir(tmp_path):
+    (tmp_path / "datasets" / "xhlulu" / "flickrfaceshq-dataset-nvidia-resized-256px").mkdir(parents=True)
+    assert rt.find_input_dir("flickrfaceshq", tmp_path).name.startswith("flickrfaceshq")
+    assert rt.find_input_dir("nothing-like-this", tmp_path) is None
 
 
 class FakeEditor:
@@ -313,12 +353,17 @@ def test_edit_check_runs(cfg, dataset, tmp_path, monkeypatch):
         for i in range(2):                                           # the fixture's 2 eval images
             Image.fromarray(np.random.default_rng(i).integers(0, 255, (64, 64, 3), dtype=np.uint8)).save(
                 pgd_root / run / "images" / f"{i:05d}.png")
-    edit.main(["--config", "", f"data_root={str(dataset)!r}", "image_size=64",
+    _patch(monkeypatch, pgd)                                         # for --make-missing
+    edit.main(["--config", "", f"data_root={str(dataset)!r}", "image_size=64", "pgd_steps=2", "pgd_batch=2",
+               "num_workers=0", "--make-missing",
                "--pgd-root", str(pgd_root), "--out", str(out), "--sizes", "64", "128",
-               "--runs", "pgd8=eps8", "vae_only=abl_vae_only", "gone=missing_run"])
+               "--runs", "pgd8", "vae_only", "pgd16", "gone=missing_run"])
+    # pgd16 had no folder: computed for exactly the edit-check images, with its own eps.
+    assert sorted(p.name for p in (pgd_root / "eps16" / "images").iterdir()) == ["00000.png", "00001.png"]
+    assert json.loads((pgd_root / "eps16" / "summary.json").read_text())["eps_255"] == pytest.approx(16, abs=0.01)
     df = pd.read_csv(out / "metrics.csv")
-    assert set(df.method) == {"clean", "clean_again", "random8", "pgd8", "vae_only"}            # missing run skipped
-    assert len(df) == 2 * 2 * 5                                                  # images x sizes x methods
+    assert set(df.method) == {"clean", "clean_again", "random8", "pgd8", "vae_only", "pgd16"}  # custom missing: skipped
+    assert len(df) == 2 * 2 * 6                                                  # images x sizes x methods
     same = df.method.isin(["clean", "clean_again"])
     assert (df[same].lpips_vs_clean_edit == 0).all()                             # same input + seed -> same edit
     assert (df[~same].lpips_vs_clean_edit > 0).all()
@@ -331,8 +376,11 @@ def test_notebook_cells_are_valid_python():
         for c in json.loads(nb.read_text(encoding="utf-8"))["cells"]:
             if c["cell_type"] == "code":
                 src = "".join(c["source"])
-                lines = ["pass" if ln.lstrip().startswith(("!", "%")) else ln for ln in src.splitlines()]
+                lines = [ln[:len(ln) - len(ln.lstrip())] + "pass" if ln.lstrip().startswith(("!", "%")) else ln
+                         for ln in src.splitlines()]
                 compile("\n".join(lines), f"{nb.name}", "exec")
+                if "rt.prepare(" in src:                             # setup block must not need Colab
+                    assert "from google.colab import drive" not in src.split("if not KAGGLE")[0]
 
 
 def test_pgd_subset_keeps_source_mix():
