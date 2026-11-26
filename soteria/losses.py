@@ -90,6 +90,9 @@ class CloakLoss:
             cos = F.cosine_similarity(f_adv, f_clean, dim=-1)
             terms["face"] = cfg.w_face * cos.clamp_min(cfg.face_floor).mean()
             logs["face_cos"] = cos.mean().detach()
+        elif "face" in chosen and cfg.w_face > 0:
+            # No face in this batch: keep the keys so every log row has the same columns.
+            logs["loss_face"] = logs["face_cos"] = torch.tensor(float("nan"))
 
         lp = self.lpips(x_cloak.float() * 2 - 1, x.float() * 2 - 1).flatten()
         terms["lpips"] = cfg.w_lpips * F.relu(lp - cfg.lpips_budget).mean()

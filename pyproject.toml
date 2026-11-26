@@ -5,7 +5,7 @@ description = "Feed-forward adversarial cloaks against image-editing, semantic a
 requires-python = ">=3.10"
 
 [tool.setuptools]
-packages = ["soteria"]
+packages = ["soteria", "soteria.eval"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

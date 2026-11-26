@@ -63,6 +63,53 @@ def atomic_save(obj, path: Path):
     os.replace(tmp, path)
 
 
+# Keys that may differ between sessions of one run. Anything else changing on
+# resume (loss weights, floors, eps, surrogates, ...) would silently splice two
+# different experiments into one checkpoint, so it is refused.
+RESUMABLE_KEYS = {"steps", "budget_min", "log_every", "val_every", "ckpt_every", "num_workers",
+                  "data_root", "out_dir"}
+
+
+def check_resume_config(saved: dict, cfg: Config) -> None:
+    now = cfg.to_dict()
+    # Keys a checkpoint does not have were added to Config after it was saved.
+    diff = {k: (saved[k], now[k]) for k in now if k in saved and k not in RESUMABLE_KEYS and saved[k] != now[k]}
+    if diff:
+        lines = "\n".join(f"  {k}: checkpoint {a!r} -> now {b!r}" for k, (a, b) in diff.items())
+        raise ValueError(f"{cfg.out_dir} holds a run with a different config:\n{lines}\n"
+                         "Restore the original settings to resume, or use a new out_dir (RUN_NAME) "
+                         "for the new experiment.")
+
+
+def trim_csv(path: Path, max_step: int) -> None:
+    """Drop rows logged after the checkpoint we resume from: those steps are
+    about to be re-run, and keeping both copies would double them in plots."""
+    if not path.exists():
+        return
+    with path.open(newline="") as f:
+        reader = csv.DictReader(f)
+        fields, rows = reader.fieldnames, [r for r in reader if int(r["step"]) <= max_step]
+    with path.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        w.writerows(rows)
+
+
+def append_csv(path: Path, row: dict) -> None:
+    """Append under the file's existing header, so a row with a missing or
+    extra key cannot shift its values into the wrong columns."""
+    if path.exists():
+        with path.open(newline="") as f:
+            fields = next(csv.reader(f), None)
+    else:
+        fields = None
+    with path.open("a", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields or list(row), restval="", extrasaction="ignore")
+        if not fields:
+            w.writeheader()
+        w.writerow(row)
+
+
 def to_device(batch, device):
     return {k: v.to(device, non_blocking=True) if torch.is_tensor(v) else v for k, v in batch.items()}
 
@@ -118,9 +165,11 @@ def main(argv=None):
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda(cfg))
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
-    step, ckpt_path = 0, out_dir / "last.pt"
+    step, ckpt_path, prior_min, last_val = 0, out_dir / "last.pt", 0.0, None
+    log_file, val_file = out_dir / "log.csv", out_dir / "val.csv"
     if ckpt_path.exists():
         ck = torch.load(ckpt_path, map_location=device, weights_only=False)
+        check_resume_config(ck["cfg"], cfg)
         G.load_state_dict(ck["G"])
         ema.load_state_dict(ck["ema"])
         opt.load_state_dict(ck["opt"])
@@ -130,20 +179,39 @@ def main(argv=None):
         np.random.set_state(ck["rng"]["numpy"])
         torch.set_rng_state(ck["rng"]["torch"].cpu())   # map_location moved it to the GPU
         step = ck["step"]
-        print(f"resumed from step {step}")
+        prior_min, last_val = ck.get("train_min", 0.0), ck.get("last_val")
+        trim_csv(log_file, step)
+        trim_csv(val_file, step)
+        print(f"resumed from step {step} ({prior_min:.0f} GPU-min so far)")
+    if step >= cfg.steps:
+        print(f"already finished: step {step} of {cfg.steps}. Results are in {out_dir}")
+        return
+    started = time.time()
+    start_step = step
 
     def save():
+        train_min = prior_min + (time.time() - started) / 60
         atomic_save({
             "step": step, "G": G.state_dict(), "ema": ema.state_dict(), "opt": opt.state_dict(),
             "sched": sched.state_dict(), "scaler": scaler.state_dict(), "cfg": cfg.to_dict(),
             "rng": {"python": random.getstate(), "numpy": np.random.get_state(), "torch": torch.get_rng_state()},
+            "train_min": train_min, "last_val": last_val,
         }, ckpt_path)
         # Inference-only export: EMA weights + eps, nothing else.
         atomic_save({"state_dict": ema.state_dict(), "eps": cfg.eps, "step": step}, out_dir / "generator_ema.pt")
+        # Human-readable progress, small enough to read from Drive or paste anywhere.
+        session_steps = step - start_step
+        min_per_step = (time.time() - started) / 60 / session_steps if session_steps else None
+        status = {"step": step, "steps": cfg.steps, "done": step >= cfg.steps, "train_min": round(train_min, 1),
+                  "min_per_step": min_per_step,
+                  "eta_hours": round((cfg.steps - step) * min_per_step / 60, 1) if min_per_step else None,
+                  "updated": time.strftime("%Y-%m-%d %H:%M:%S"), "last_val": last_val}
+        tmp = out_dir / "status.json.tmp"
+        tmp.write_text(json.dumps(status, indent=2))
+        os.replace(tmp, out_dir / "status.json")
 
     writer = SummaryWriter(out_dir / "tb")
-    log_file = out_dir / "log.csv"
-    started, t_last, seen = time.time(), time.time(), 0
+    t_last, seen = time.time(), 0
     batches = infinite(loader)
     G.train()
 
@@ -181,18 +249,15 @@ def main(argv=None):
             for k, v in row.items():
                 if isinstance(v, float):
                     writer.add_scalar(f"train/{k}", v, step)
-            new = not log_file.exists()
-            with log_file.open("a", newline="") as f:
-                w = csv.DictWriter(f, fieldnames=list(row))
-                if new:
-                    w.writeheader()
-                w.writerow(row)
+            append_csv(log_file, row)
             print(" ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in row.items()), flush=True)
 
         if step % cfg.val_every == 0 or step == cfg.steps:
             summary = validate(ema, val_batch, surrogates, lpips_model, cfg.mask_min, out_dir, step)
             for k, v in summary.items():
                 writer.add_scalar(f"val/{k}", v, step)
+            last_val = {"step": step, **summary}
+            append_csv(val_file, last_val)
             print("val", json.dumps({k: round(v, 4) for k, v in summary.items()}), flush=True)
 
         if step % cfg.ckpt_every == 0:

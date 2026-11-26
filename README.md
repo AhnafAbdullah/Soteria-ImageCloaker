@@ -13,13 +13,17 @@ round trips. Proposal: `i233012_i233018_Project_Proposal.pdf`.
 | Notebook | What it does | Time |
 |---|---|---|
 | `colab/01_data.ipynb` | FFHQ-256 + COCO val2017 → 256 px, landmarks, fixed eval split, tar on Drive | ~30–45 min, once |
-| `colab/02_pgd.ipynb` | surrogate sanity checks, then the PGD baseline at 8/255 and 16/255 (the go/no-go gate) | ~2–3 h |
-| `colab/03_train.ipynb` | 300-step smoke run, then the main 20k-step run (resumable) | ~20 min + 4–6 h |
+| `colab/02_pgd.ipynb` | surrogate sanity checks, PGD baseline at 8/255 and 16/255 (the go/no-go gate), VAE ablation, SD1.5 img2img edit check | ~2.5 h + 50 min + 30 min |
+| `colab/03_train.ipynb` | 300-step smoke run (measures speed, projects the main run), progress viewer, main 20k-step run (resumable) | ~20 min + ~20 GPU-h (projected from PGD speed; the smoke run measures it) |
 
-Set `REPO_URL` in each notebook's first cell, or leave it empty and copy this
-folder to `MyDrive/soteria/code/Project-Soteria`. Runs, checkpoints and data
-live under `MyDrive/soteria`, so a reclaimed session loses only the steps
-since the last checkpoint. Rerunning `03_train.ipynb` resumes from `last.pt`.
+Every code cell in 02 and 03 is self-contained: it mounts Drive, pulls the
+code, installs requirements and unpacks the data as needed (seconds when
+already done; `soteria/colab.py`). After a disconnect, rerun only the cell you
+need. Runs, checkpoints and data live under `MyDrive/soteria`; the training
+cell resumes from `runs/<RUN_NAME>/last.pt`, refuses to resume with a changed
+loss config, and keeps `status.json`, `log.csv` and `val.csv` there. Give each
+person and each experiment its own `RUN_NAME`. A private fork needs a Colab
+secret `GITHUB_TOKEN`.
 
 ## Layout
 
@@ -36,6 +40,8 @@ soteria/
   train.py        AMP, EMA, resume, time budget, TensorBoard
   pgd.py          per-image PGD+EOT baseline with the same objective
   infer.py        cloak one photo at any size (optionally pre-resized to the platform size)
+  colab.py        Colab runtime setup shared by every notebook cell
+  eval/edit.py    SD1.5 img2img edit check: clean vs cloaked edits, same seed, with controls
 configs/          base_256.yaml, smoke.yaml, pgd.yaml
 scripts/          prepare_data.py, check_surrogates.py
 tests/            CPU smoke tests with tiny stand-in surrogates (no downloads)
@@ -64,7 +70,8 @@ they are reported as "unseen pipeline, seen encoder".
 
 ## Known gaps (planned next)
 
-- `soteria/eval/` (editing, face-ID, VLM, robustness, speed), the Gradio app
+- `soteria/eval/` has only the SD1.5 img2img edit check (`edit.py`); held-out face-ID, VLM,
+  robustness and speed evals, the Gradio app
   and API are not written yet.
 - `platform_scale` / `platform_q` in the config are placeholders until the
   WhatsApp / Instagram round-trip calibration replaces them.

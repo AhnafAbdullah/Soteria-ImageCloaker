@@ -4,7 +4,10 @@
 """
 from __future__ import annotations
 
+import json
 import random
+import tarfile
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -14,7 +17,8 @@ import torch.nn.functional as F
 from PIL import Image
 from torch import nn
 
-from soteria import pgd, train
+from soteria import colab, pgd, train
+from soteria.eval import edit
 from soteria.augment import EOT, Crop, real_jpeg
 from soteria.config import Config
 from soteria.data import LM_COLS
@@ -247,9 +251,88 @@ def test_train_runs_and_resumes(cfg, dataset, tmp_path, monkeypatch):
     train.main(args + ["steps=3"])
     assert (out / "last.pt").exists() and (out / "generator_ema.pt").exists()
     assert torch.load(out / "last.pt", weights_only=False)["step"] == 3
+    # A row logged after the last checkpoint (lost in a disconnect) must not survive the resume.
+    with (out / "log.csv").open("a") as f:
+        f.write("99" + "," * (len(pd.read_csv(out / "log.csv").columns) - 1) + "\n")
     train.main(args + ["steps=5"])
     assert torch.load(out / "last.pt", weights_only=False)["step"] == 5
-    assert len(pd.read_csv(out / "log.csv")) >= 5
+    log = pd.read_csv(out / "log.csv")
+    assert list(log.step) == [1, 2, 3, 4, 5]
+    assert log.notna().all().drop(["loss_face", "face_cos"], errors="ignore").all()   # no shifted columns
+    assert list(pd.read_csv(out / "val.csv").step) == [2, 3, 4, 5]      # every 2 steps + end of each run
+    status = json.loads((out / "status.json").read_text())
+    assert status["step"] == 5 and status["done"] and status["last_val"]["step"] == 5
+    train.main(args + ["steps=5"])                                   # finished: returns early
+    with pytest.raises(ValueError, match="w_vae"):
+        train.main(args + ["steps=8", "w_vae=2.0"])                  # different loss: refused
+
+
+def test_csv_append_keeps_columns(tmp_path):
+    p = tmp_path / "log.csv"
+    train.append_csv(p, {"step": 1, "a": 1.0, "b": 2.0})
+    train.append_csv(p, {"step": 2, "b": 4.0})                       # missing "a"
+    train.append_csv(p, {"step": 3, "a": 5.0, "b": 6.0, "new": 0.0})  # extra key
+    df = pd.read_csv(p)
+    assert list(df.columns) == ["step", "a", "b"] and list(df.b) == [2.0, 4.0, 6.0]
+    train.trim_csv(p, 2)
+    assert list(pd.read_csv(p).step) == [1, 2]
+
+
+def test_restore_data_from_tar(tmp_path):
+    src = tmp_path / "src" / "prepared"
+    src.mkdir(parents=True)
+    (src / "manifest.csv").write_text("path\na.png\nb.png\n")
+    (tmp_path / "drive" / "data").mkdir(parents=True)
+    with tarfile.open(tmp_path / "drive" / "data" / "prepared.tar", "w") as t:
+        t.add(src, arcname="prepared")
+    dest = tmp_path / "local"
+    assert colab.restore_data(tmp_path / "drive", dest) == dest / "prepared"
+    assert (dest / "prepared" / "manifest.csv").exists()
+    colab.restore_data(tmp_path / "drive", dest)                     # second call: no-op
+    with pytest.raises(FileNotFoundError, match="01_data"):
+        colab.restore_data(tmp_path / "nowhere", tmp_path / "empty")
+
+
+class FakeEditor:
+    """Stand-in for SD img2img: blur plus noise drawn from each item's generator."""
+
+    def __call__(self, prompt, image, generator, output_type, **_):
+        assert output_type == "pt" and len(prompt) == len(generator) == image.shape[0]
+        noise = torch.stack([torch.randn(image.shape[1:], generator=g) for g in generator])
+        out = F.avg_pool2d(image, 3, 1, 1) + 0.05 * noise
+        return type("Out", (), {"images": out.clamp(0, 1)})()
+
+
+def test_edit_check_runs(cfg, dataset, tmp_path, monkeypatch):
+    monkeypatch.setattr(edit, "load_editor", lambda device: FakeEditor())
+    monkeypatch.setattr(edit, "load_surrogates", tiny_surrogates)
+    monkeypatch.setattr(edit, "load_lpips", lambda device: TinyLPIPS().to(device))
+    pgd_root, out = tmp_path / "pgd", tmp_path / "edit"
+    for run in ("eps8", "abl_vae_only"):
+        (pgd_root / run / "images").mkdir(parents=True)
+        for i in range(2):                                           # the fixture's 2 eval images
+            Image.fromarray(np.random.default_rng(i).integers(0, 255, (64, 64, 3), dtype=np.uint8)).save(
+                pgd_root / run / "images" / f"{i:05d}.png")
+    edit.main(["--config", "", f"data_root={str(dataset)!r}", "image_size=64",
+               "--pgd-root", str(pgd_root), "--out", str(out), "--sizes", "64", "128",
+               "--runs", "pgd8=eps8", "vae_only=abl_vae_only", "gone=missing_run"])
+    df = pd.read_csv(out / "metrics.csv")
+    assert set(df.method) == {"clean", "clean_again", "random8", "pgd8", "vae_only"}            # missing run skipped
+    assert len(df) == 2 * 2 * 5                                                  # images x sizes x methods
+    same = df.method.isin(["clean", "clean_again"])
+    assert (df[same].lpips_vs_clean_edit == 0).all()                             # same input + seed -> same edit
+    assert (df[~same].lpips_vs_clean_edit > 0).all()
+    assert df[df.has_face].id_cos.notna().all() and df[~df.has_face].id_cos.isna().all()
+    assert (out / "grid_64.png").exists() and (out / "grid_128.png").exists()
+
+
+def test_notebook_cells_are_valid_python():
+    for nb in Path(__file__).resolve().parents[1].glob("colab/*.ipynb"):
+        for c in json.loads(nb.read_text(encoding="utf-8"))["cells"]:
+            if c["cell_type"] == "code":
+                src = "".join(c["source"])
+                lines = ["pass" if ln.lstrip().startswith(("!", "%")) else ln for ln in src.splitlines()]
+                compile("\n".join(lines), f"{nb.name}", "exec")
 
 
 def test_pgd_subset_keeps_source_mix():
