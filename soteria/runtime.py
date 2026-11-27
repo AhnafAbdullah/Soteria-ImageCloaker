@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 from pathlib import Path
 
 KAGGLE_INPUT = Path("/kaggle/input")
@@ -132,9 +133,13 @@ def unpack(tar: Path, dest: Path) -> Path:
     manifest = dest / "prepared" / "manifest.csv"
     if not manifest.exists():
         dest.mkdir(parents=True, exist_ok=True)
-        print(f"unpacking {tar} -> {dest} ...", flush=True)
+        size_gb = tar.stat().st_size / 1e9
+        print(f"unpacking {tar} ({size_gb:.1f} GB) -> {dest} ...", flush=True)
+        t0 = time.time()
         with tarfile.open(tar) as t:
             t.extractall(dest, filter="data")     # "data": refuse absolute paths / .. escapes
+        minutes = (time.time() - t0) / 60
+        print(f"unpacked in {minutes:.1f} min ({size_gb * 1000 / max(minutes * 60, 1e-6):.0f} MB/s)", flush=True)
     return manifest.parent
 
 

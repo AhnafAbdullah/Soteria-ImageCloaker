@@ -168,6 +168,48 @@ print(f"{len(same)} images, after a real JPEG q75 round trip (lower = better pro
 display(table.round(4))
 """
 
+EDIT_MD = r"""
+## Edit check: does a cloak actually spoil a Stable Diffusion edit?
+
+The VAE ratio is only a proxy. This runs SD1.5 img2img (strength 0.5) on 16 of
+the images above (12 faces, 4 scenes): the clean photo, two controls and every
+PGD run (pgd8, vae_only, rebalanced, pgd16), all with the same prompt and the
+same seeded noise. It runs at 256 px (the size the cloaks were made at) and
+512 px (SD1.5's native size, the cloak upscaled).
+
+**This cell runs on its own.** Any PGD run whose images are not in
+`ROOT/pgd` (e.g. on Kaggle, where the Colab runs are not available) is
+computed first for just these 16 images: ~25 min on a T4, then ~30 min of
+edits. On Colab with the earlier runs on Drive it goes straight to the edits.
+
+Controls:
+- `clean_again`: the clean photo edited a second time. Its score is the
+  noise floor of the GPU itself; anything near it means no effect.
+- `random8`: random noise at the full 8/255 budget.
+
+Read the results like this:
+- `lpips_vs_clean_edit`: how different the edit of the cloaked photo is from
+  the edit of the clean one. A cloak works only if this is **clearly above
+  `random8`**, not just above 0.
+- `id_cos`: ArcFace similarity of the edit to the original person. The
+  `clean` row is what the edit keeps by itself; lower than that = identity lost.
+- `grid_*.png`: rows are images; columns are the clean input, then the edit of
+  clean, clean_again, random8, pgd8, vae_only, rebalanced, pgd16. Look for edits
+  that are visibly wrecked (smears, grey patches, wrong content), not just different.
+
+Writes `ROOT/edit_check/`: grid_256.png, grid_512.png, metrics.csv, summary.csv.
+"""
+
+EDIT_CELL = r"""
+!python -m soteria.eval.edit data_root={DATA} --make-missing --pgd-root {ROOT}/pgd --out {ROOT}/edit_check
+import pandas as pd
+from IPython.display import Image as Show, display
+display(pd.read_csv(f"{ROOT}/edit_check/summary.csv").round(4))
+for size in (256, 512):
+    print(f"grid {size}px: clean input | edit of clean, clean_again, random8, pgd8, vae_only, rebalanced, pgd16")
+    display(Show(f"{ROOT}/edit_check/grid_{size}.png", width=900))
+"""
+
 write("02_pgd.ipynb", [
     md(r"""
 # 02 · Surrogate checks, PGD baseline and edit check (the go/no-go gate)
@@ -221,46 +263,28 @@ all three on exactly the same images.
 !python -m soteria.pgd --config configs/pgd.yaml eps=0.03137 pgd_images=64 clip_floor=0.3 face_floor=-0.1 w_vae=4 data_root={DATA} out_dir={ROOT}/pgd/abl_rebalanced
 """),
     cell(COMPARE, data=False, gpu=False, requirements=()),
+    md(EDIT_MD),
+    cell(EDIT_CELL),
+])
+
+# The edit check alone, so Kaggle's "Save & Run All" (background, output kept)
+# runs just this instead of every PGD cell in 02.
+write("02b_edit_check.ipynb", [
     md(r"""
-## Edit check: does a cloak actually spoil a Stable Diffusion edit?
+# 02b · Edit check only
 
-The VAE ratio is only a proxy. This runs SD1.5 img2img (strength 0.5) on 16 of
-the images above (12 faces, 4 scenes): the clean photo, two controls and every
-PGD run (pgd8, vae_only, rebalanced, pgd16), all with the same prompt and the
-same seeded noise. It runs at 256 px (the size the cloaks were made at) and
-512 px (SD1.5's native size, the cloak upscaled).
+The last cell of 02_pgd as its own notebook, for platforms where long jobs
+must run as a saved version.
 
-**This cell runs on its own.** Any PGD run whose images are not in
-`ROOT/pgd` (e.g. on Kaggle, where the Colab runs are not available) is
-computed first for just these 16 images: ~25 min on a T4, then ~30 min of
-edits. On Colab with the earlier runs on Drive it goes straight to the edits.
-
-Controls:
-- `clean_again`: the clean photo edited a second time. Its score is the
-  noise floor of the GPU itself; anything near it means no effect.
-- `random8`: random noise at the full 8/255 budget.
-
-Read the results like this:
-- `lpips_vs_clean_edit`: how different the edit of the cloaked photo is from
-  the edit of the clean one. A cloak works only if this is **clearly above
-  `random8`**, not just above 0.
-- `id_cos`: ArcFace similarity of the edit to the original person. The
-  `clean` row is what the edit keeps by itself; lower than that = identity lost.
-- `grid_*.png`: rows are images; columns are the clean input, then the edit of
-  clean, clean_again, random8, pgd8, vae_only, rebalanced, pgd16. Look for edits
-  that are visibly wrecked (smears, grey patches, wrong content), not just different.
-
-Writes `ROOT/edit_check/`: grid_256.png, grid_512.png, metrics.csv, summary.csv.
+**Kaggle:** attach the 01_data output (Add Input → Your Work), set GPU T4 x2
+and Internet On, then **Save Version → Save & Run All**. It runs in the
+background (you can close the tab; ~1–1.5 h) and the results are kept in that
+version's **Output** tab under `soteria/edit_check/`. Interactive sessions get
+stopped when idle, which loses everything in `/kaggle/working`.
 """),
-    cell(r"""
-!python -m soteria.eval.edit data_root={DATA} --make-missing --pgd-root {ROOT}/pgd --out {ROOT}/edit_check
-import pandas as pd
-from IPython.display import Image as Show, display
-display(pd.read_csv(f"{ROOT}/edit_check/summary.csv").round(4))
-for size in (256, 512):
-    print(f"grid {size}px: clean input | edit of clean, clean_again, random8, pgd8, vae_only, rebalanced, pgd16")
-    display(Show(f"{ROOT}/edit_check/grid_{size}.png", width=900))
-"""),
+    md(PLATFORM_NOTE),
+    md(EDIT_MD),
+    cell(EDIT_CELL),
 ])
 
 
@@ -333,7 +357,8 @@ find `runs/<RUN_NAME>/last.pt` there and resume from it.
 """),
     md(PLATFORM_NOTE),
     cell(r"""
-RUN_SMOKE = True           # set False once checked (Kaggle "Save & Run All" runs every cell)
+RUN_SMOKE   = True         # set False once checked (Kaggle "Save & Run All" runs every cell)
+TRAIN_HOURS = 12           # GPU-hours you can give the main run in total; prints the STEPS that fit
 if RUN_SMOKE:
     import glob, pandas as pd, yaml
     from IPython.display import Image as Show, display
@@ -345,14 +370,25 @@ if RUN_SMOKE:
     session_h = rt.SESSION_MIN[PLATFORM] / 60
     print(f"{img_per_s:.1f} img/s -> main run ({main['steps']} steps x {main['batch_size']}) ~ {hours:.1f} GPU-hours "
           f"~ {hours / session_h:.1f} sessions of {session_h:.1f} h on {PLATFORM}")
+    fit = int(TRAIN_HOURS * 3600 * img_per_s / main["batch_size"] // 500 * 500)
+    print(f"{TRAIN_HOURS} GPU-hours of training fit ~{fit} steps -> set STEPS = {fit} in the main-run cell")
     samples = sorted(glob.glob(f"{ROOT}/runs/smoke/samples/*.png"))
     if samples:
         display(Show(samples[-1]))
 """),
     cell(PROGRESS, data=False, gpu=False, requirements=()),
     cell(TRAIN_SETTINGS + r'''
-BUDGET_MIN = rt.SESSION_MIN[PLATFORM]
-!python -m soteria.train --config {CONFIG} out_dir={OUT} data_root={DATA} budget_min={BUDGET_MIN} {OVERRIDES}
-print((OUT / "status.json").read_text() if (OUT / "status.json").exists() else "no status written")
+RUN_MAIN   = False         # set True to train (Kaggle "Save & Run All" runs every cell)
+STEPS      = 20000         # total steps for the whole run; size it from the smoke run's suggestion.
+                           # Set it before the first session: the LR schedule is built from it.
+BUDGET_MIN = rt.SESSION_MIN[PLATFORM]   # training minutes in THIS session. On Kaggle keep it
+                           # below your remaining weekly GPU quota minus ~45 min: a session cut off
+                           # by the quota may lose its output; one that stops itself is saved.
+if RUN_MAIN:
+    get_ipython().system(f"python -m soteria.train --config {CONFIG} out_dir={OUT} data_root={DATA} "
+                         f"steps={STEPS} budget_min={BUDGET_MIN} {OVERRIDES}")
+    print((OUT / "status.json").read_text() if (OUT / "status.json").exists() else "no status written")
+else:
+    print("RUN_MAIN is False: main run skipped")
 '''),
 ])

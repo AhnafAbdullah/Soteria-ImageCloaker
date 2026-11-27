@@ -14,6 +14,7 @@ round trips. Proposal: `i233012_i233018_Project_Proposal.pdf`.
 |---|---|---|
 | `colab/01_data.ipynb` | FFHQ-256 + COCO val2017 → 256 px, landmarks, fixed eval split, `prepared.tar` | ~30–45 min, once per platform |
 | `colab/02_pgd.ipynb` | surrogate sanity checks, PGD baseline at 8/255 and 16/255 (the go/no-go gate), VAE ablation, SD1.5 img2img edit check | ~2.5 h + 50 min + 30 min (edit check alone: ~1 h if it must make its own cloaks) |
+| `colab/02b_edit_check.ipynb` | the edit check alone, for Kaggle "Save & Run All" (runs in the background, output kept) | ~1–1.5 h |
 | `colab/03_train.ipynb` | 300-step smoke run (measures speed, projects the main run), progress viewer, main 20k-step run (resumable) | ~20 min + ~20 GPU-h (projected from PGD speed; the smoke run measures it) |
 
 Every code cell is self-contained: it detects Colab or Kaggle, pulls the
