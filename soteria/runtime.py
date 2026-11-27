@@ -91,7 +91,7 @@ def install_requirements(files: tuple[str, ...], marker_dir: Path = Path("/tmp")
     marker.touch()
 
 
-def find_inputs(pattern: str, base: Path = KAGGLE_INPUT, max_depth: int = 5) -> list[Path]:
+def find_inputs(pattern: str, base: Path = KAGGLE_INPUT, max_depth: int = 7) -> list[Path]:
     """Matches of pattern (e.g. "prepared.tar") up to max_depth folders below
     base. Kaggle's input layout differs between datasets and notebook outputs,
     so the depth is not fixed."""
