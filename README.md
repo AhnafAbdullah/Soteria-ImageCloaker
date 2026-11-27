@@ -29,7 +29,7 @@ training cell refuses to resume with a changed loss config.
 | Data | `ROOT/data/prepared.tar` | attach the 01_data output (Add Input → Your Work) |
 | FFHQ for 01 | downloaded with `kaggle.json` | attach `xhlulu/flickrfaceshq-dataset-nvidia-resized-256px` |
 | Resume training | `ROOT/runs/<RUN_NAME>/last.pt` on Drive | attach the previous version's output; its run folder is copied back |
-| Session budget | 330 min | 660 min |
+| Session budget | 330 min | 600 min |
 | Secrets (`HF_TOKEN`, `GITHUB_TOKEN`) | Colab secrets | Add-ons → Secrets |
 
 Kaggle also needs Settings → Accelerator **GPU T4 x2** and Internet **On**.

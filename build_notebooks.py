@@ -335,7 +335,7 @@ can run any one of them directly; you never need to rerun the cells above it.
 - **Progress** (no GPU needed): status, ETA, loss and validation curves and the
   latest samples. Run it whenever.
 - **Main run**: checkpoints every 500 steps and stops itself before the
-  session limit (5.5 h on Colab, 11 h on Kaggle). To continue, rerun only
+  session limit (5.5 h on Colab, 10 h on Kaggle). To continue, rerun only
   this cell: it resumes from `last.pt` and loses at most the steps since the
   last checkpoint.
 

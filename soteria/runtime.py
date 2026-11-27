@@ -35,8 +35,8 @@ KAGGLE_INPUT = Path("/kaggle/input")
 ROOTS = {"colab": "/content/drive/MyDrive/soteria", "kaggle": "/kaggle/working/soteria", "local": "local_root"}
 LOCAL_DATA = {"colab": "/content/data", "kaggle": "/tmp/data", "local": "data"}
 # Training stops itself this long into a session: Colab free sessions last ~6 h,
-# Kaggle sessions 12 h (setup, data unpacking and saving need the rest).
-SESSION_MIN = {"colab": 330, "kaggle": 660, "local": 0}
+# Kaggle sessions 12 h (setup, data unpacking, a smoke run and saving need the rest).
+SESSION_MIN = {"colab": 330, "kaggle": 600, "local": 0}
 
 
 def platform() -> str:
