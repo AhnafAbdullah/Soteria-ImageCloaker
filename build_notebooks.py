@@ -335,7 +335,7 @@ can run any one of them directly; you never need to rerun the cells above it.
 - **Progress** (no GPU needed): status, ETA, loss and validation curves and the
   latest samples. Run it whenever.
 - **Main run**: checkpoints every 500 steps and stops itself before the
-  session limit (5.5 h on Colab, 10 h on Kaggle). To continue, rerun only
+  session limit (5.5 h on Colab; on Kaggle, 30 min before the 12 h hard stop, however long setup took). To continue, rerun only
   this cell: it resumes from `last.pt` and loses at most the steps since the
   last checkpoint.
 
@@ -381,10 +381,11 @@ if RUN_SMOKE:
 RUN_MAIN   = False         # set True to train (Kaggle "Save & Run All" runs every cell)
 STEPS      = 20000         # total steps for the whole run; size it from the smoke run's suggestion.
                            # Set it before the first session: the LR schedule is built from it.
-BUDGET_MIN = rt.SESSION_MIN[PLATFORM]   # training minutes in THIS session. On Kaggle keep it
-                           # below your remaining weekly GPU quota minus ~45 min: a session cut off
-                           # by the quota may lose its output; one that stops itself is saved.
+BUDGET_MIN = rt.session_budget_min()   # training minutes in THIS session. Kaggle: all that is left
+                           # of the 12 h session limit minus 30 min, so the run stops itself and is saved
+                           # rather than being killed. Colab: 330. Or set a number.
 if RUN_MAIN:
+    print(f"training for up to {BUDGET_MIN} min this session, then saving; rerun to resume")
     get_ipython().system(f"python -m soteria.train --config {CONFIG} out_dir={OUT} data_root={DATA} "
                          f"steps={STEPS} budget_min={BUDGET_MIN} {OVERRIDES}")
     print((OUT / "status.json").read_text() if (OUT / "status.json").exists() else "no status written")

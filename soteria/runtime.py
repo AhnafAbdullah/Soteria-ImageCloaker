@@ -34,9 +34,35 @@ from pathlib import Path
 KAGGLE_INPUT = Path("/kaggle/input")
 ROOTS = {"colab": "/content/drive/MyDrive/soteria", "kaggle": "/kaggle/working/soteria", "local": "local_root"}
 LOCAL_DATA = {"colab": "/content/data", "kaggle": "/tmp/data", "local": "data"}
-# Training stops itself this long into a session: Colab free sessions last ~6 h,
-# Kaggle sessions 12 h (setup, data unpacking, a smoke run and saving need the rest).
+# Typical training minutes per session: Colab free sessions last ~6 h; Kaggle
+# sessions are hard-stopped at 12 h (see session_budget_min for the exact figure).
 SESSION_MIN = {"colab": 330, "kaggle": 600, "local": 0}
+KAGGLE_LIMIT_MIN = 720
+# Kept free at the end of a Kaggle session: model loading inside train.py, the
+# final checkpoint and validation, and Kaggle copying /kaggle/working to the output.
+KAGGLE_RESERVE_MIN = 30
+
+
+def session_budget_min(started: float | None = None) -> int:
+    """Training minutes for a run started now in this session.
+
+    Kaggle: whatever is left of the 12 h hard limit minus a reserve, however
+    long setup, data unpacking and a smoke run took, so the run stops itself
+    and its checkpoint is saved instead of being killed. The session start is
+    the notebook kernel's start time (exact for "Save & Run All"; a kernel
+    restart mid-session would make it overestimate). Elsewhere: SESSION_MIN.
+    """
+    plat = platform()
+    if plat != "kaggle":
+        return SESSION_MIN[plat]
+    if started is None:
+        try:
+            import psutil
+            started = psutil.Process(os.getpid()).create_time()
+        except Exception:
+            return SESSION_MIN["kaggle"]
+    left = KAGGLE_LIMIT_MIN - (time.time() - started) / 60 - KAGGLE_RESERVE_MIN
+    return max(1, int(left))          # never 0: budget_min=0 means "no limit" in train.py
 
 
 def platform() -> str:
@@ -186,9 +212,14 @@ def prepare(*, data: bool = True, gpu: bool = True,
     """Set up this runtime. Returns (results root, prepared data folder or None)."""
     plat = platform()
     if gpu and not has_gpu():
-        fix = ("Settings > Accelerator > GPU T4 x2" if plat == "kaggle"
-               else "Runtime > Change runtime type > T4 GPU (do not accept a runtime with no accelerator)")
-        raise RuntimeError(f"No GPU on this runtime. {fix}, then rerun this cell.")
+        if plat == "kaggle":
+            fix = ("Turn it on in this notebook: Settings > Accelerator > GPU T4 x2 (every Kaggle notebook has "
+                   "its own setting, and an imported one starts with None), then Save & Run All again. If the GPU "
+                   "options are greyed out, the weekly GPU quota is used up until it resets.")
+        else:
+            fix = ("Runtime > Change runtime type > T4 GPU (do not accept a runtime with no accelerator), "
+                   "then rerun this cell.")
+        raise RuntimeError(f"No GPU on this runtime. {fix}")
     if os.environ.get("HF_TOKEN") is None and (token := secret("HF_TOKEN")):
         os.environ["HF_TOKEN"] = token
     if requirements:

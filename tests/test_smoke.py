@@ -327,6 +327,17 @@ def test_restore_run_from_input(tmp_path):
     assert not (tmp_path / "working" / "runs" / "other").exists()
 
 
+def test_session_budget(monkeypatch):
+    import time as _time
+    monkeypatch.setattr(rt, "platform", lambda: "kaggle")
+    assert rt.session_budget_min(started=_time.time()) in (689, 690)                 # fresh session (rounded down)
+    assert rt.session_budget_min(started=_time.time() - 50 * 60) in (639, 640)       # after 50 min of setup
+    assert rt.session_budget_min(started=_time.time() - 13 * 3600) == 1               # never 0 (= no limit)
+    assert 1 <= rt.session_budget_min() <= 690                                        # real kernel start time
+    monkeypatch.setattr(rt, "platform", lambda: "colab")
+    assert rt.session_budget_min() == 330
+
+
 def test_find_input_dir(tmp_path):
     (tmp_path / "datasets" / "xhlulu" / "flickrfaceshq-dataset-nvidia-resized-256px").mkdir(parents=True)
     assert rt.find_input_dir("flickrfaceshq", base=tmp_path).name.startswith("flickrfaceshq")
