@@ -100,7 +100,8 @@ Gets FFHQ-256 (70k aligned faces) and COCO val2017 (5k scenes), normalises
 everything to 256 px, detects 5-point face landmarks, fixes the held-out eval
 split (300 FFHQ + 100 COCO, seed 42; identical on every platform), and stores
 the result as one `prepared.tar`. Later notebooks only unpack that tar.
-About 30–45 minutes on a T4.
+No GPU needed (landmark detection runs on the CPU), so it costs no GPU quota: on Kaggle
+leave Accelerator at None. About 2.5 h on Kaggle (reading 70k files from the input is slow).
 
 **Colab:** the cell asks for `kaggle.json` (kaggle.com → Settings → API →
 Create New Token) to download FFHQ. The tar goes to Drive.
@@ -142,7 +143,7 @@ if not (PREPARED / "manifest.csv").exists():
 TAR = ROOT / "data" / "prepared.tar"
 TAR.parent.mkdir(parents=True, exist_ok=True)
 sh(f"tar -cf {TAR} -C {PREPARED.parent} prepared && ls -lh {TAR}")
-""", data=False, requirements=("requirements.txt", "requirements-data.txt")),
+""", data=False, gpu=False, requirements=("requirements.txt", "requirements-data.txt")),
 ])
 
 
