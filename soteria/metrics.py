@@ -14,11 +14,29 @@ import math
 
 import torch
 
-from .augment import real_jpeg
+from .augment import real_jpeg, resize_round_trip, upsample
 
+
+def _jpeg(q: int):
+    return lambda x: real_jpeg(x, [q] * x.shape[0])
+
+
+def _resize(scale: float, q: int | None = None):
+    """Downscale (antialiased), optionally JPEG, upscale back to the original size."""
+    def f(x):
+        small, size = resize_round_trip(x, scale)
+        return upsample(_jpeg(q)(small) if q else small, size)
+    return f
+
+
+# Training validation uses only the first two; the generator evaluation all.
 CONDITIONS = {
     "none": lambda x: x,
-    "jpeg75": lambda x: real_jpeg(x, [75] * x.shape[0]),
+    "jpeg75": _jpeg(75),
+    "jpeg90": _jpeg(90),
+    "jpeg50": _jpeg(50),
+    "resize50": _resize(0.5),                 # half size and back
+    "platform": _resize(0.75, 80),            # messaging-app style: 0.75x, JPEG q80, back
 }
 
 

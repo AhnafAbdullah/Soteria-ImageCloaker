@@ -394,3 +394,82 @@ else:
     print("RUN_MAIN is False: main run skipped")
 '''),
 ])
+
+
+# ---------------------------------------------------------------- 04 eval
+EVAL_SETTINGS = r'''
+# ---- which run ---------------------------------------------------------------
+RUN_NAME = "base_256"      # the 03_train RUN_NAME to evaluate
+EVAL = ROOT / "eval" / RUN_NAME
+CKPT = rt.find_checkpoint(ROOT / "runs" / RUN_NAME)   # its run folder, or an attached input
+print("checkpoint:", CKPT)
+'''
+
+write("04_eval.ipynb", [
+    md(r"""
+# 04 · Evaluate the trained generator
+
+Three results for the report, each cell self-contained:
+
+1. **Protection, quality, speed** (~15 min): the whole held-out split (300 FFHQ
+   + 100 COCO), clean vs cloaked, after each post-processing condition (none,
+   JPEG q90/75/50, half-size resize, a messaging-app round trip: 0.75x + JPEG
+   q80). Same metrics as the PGD baseline. Plus ms per image at 256 to 1024 px.
+2. **Edit check** (~30–40 min): SD1.5 img2img on 16 images, comparing clean,
+   the controls, per-image PGD at 8/255 (baseline and rebalanced loss) and the
+   generator. The generator's 512 px column uses cloaks **made at 512 px** (it is fully convolutional),
+   which tests the fix for the earlier finding that upscaled 256 px cloaks
+   lose their effect at SD's native size. The prompt now keeps the face
+   visible (pink hair, not sunglasses), so `id_cos` means something.
+3. **Results**: the tables in one place (no GPU needed).
+
+**Inputs to attach:** the 01_data output (or the shared prepared-data dataset)
+and the finished **03_train version** (or a dataset holding its
+`runs/<RUN_NAME>/` folder). On Kaggle run it with **Save Version → Save & Run
+All** (~1 h); results land in the version's Output under `soteria/eval/<RUN_NAME>/`.
+
+PGD reference from 02 (8/255, after JPEG q75): VAE ratio 0.894, CLIP cos 0.29,
+ArcFace cos −0.05 (baseline loss, 64 images); rebalanced loss 0.813 / 0.45 /
+0.06. PGD took ~25 s per 256 px image on a T4.
+"""),
+    md(PLATFORM_NOTE),
+    cell(EVAL_SETTINGS + r'''
+!python -m soteria.eval.generator --checkpoint {CKPT} --out {EVAL} data_root={DATA}
+from IPython.display import Image as Show, display
+print("rows: clean / cloaked / |delta| x10")
+display(Show(f"{EVAL}/samples.png"))
+'''),
+    cell(EVAL_SETTINGS + r'''
+!python -m soteria.eval.edit data_root={DATA} --make-missing --pgd-root {ROOT}/pgd --runs pgd8 rebalanced generator={EVAL}/cloaks --sizes 256 512 --out {EVAL}/edit_check
+from IPython.display import Image as Show, display
+for size in (256, 512):
+    print(f"grid {size}px: clean input | edit of clean, clean_again, random8, pgd8, rebalanced, generator")
+    display(Show(f"{EVAL}/edit_check/grid_{size}.png", width=900))
+'''),
+    cell(r'''
+# ---- results: everything for the report in one output --------------------------
+RUN_NAME = "base_256"
+EVAL = ROOT / "eval" / RUN_NAME
+import json, pandas as pd
+pd.set_option("display.width", 200)
+s = pd.read_csv(EVAL / "summary.csv", index_col=[0, 1])
+settings = json.loads((EVAL / "settings.json").read_text())
+print(f"generator step {settings['step']}, eps {settings['eps_255']:.1f}/255, {settings['images']} eval images\n")
+rows = {}
+for cond in [c.split("/")[0] for c in s.columns if c.endswith("_ratio")]:
+    for method in ("clean", "generator"):
+        r = s.loc[(method, "all")]
+        rows[(cond, method)] = {c.split("/")[1]: r[c] for c in s.columns
+                                if c.startswith(cond + "/") and not c.endswith("_shift")}
+print("PROTECTION (all 400 images; lower = better):")
+display(pd.DataFrame(rows).T.round(4))
+print("QUALITY:")
+display(s[["psnr", "lpips", "linf_255"]].round(4))
+print("BY SOURCE after jpeg75:")
+display(s[[c for c in s.columns if c.startswith("jpeg75/") and not c.endswith("_shift")]].round(4))
+print("SPEED:", json.dumps(json.loads((EVAL / "speed.json").read_text()), indent=1))
+if (EVAL / "edit_check" / "summary.csv").exists():
+    print("EDIT CHECK (higher lpips / lower id_cos = more disruption; native = cloak made at that size):")
+    display(pd.read_csv(EVAL / "edit_check" / "summary.csv").round(4))
+''', data=False, gpu=False, requirements=()),
+])

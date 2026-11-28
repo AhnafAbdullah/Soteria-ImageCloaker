@@ -207,6 +207,24 @@ def restore_run(run_dir: str | Path, inputs: Path = KAGGLE_INPUT) -> None:
     shutil.copytree(src, run_dir, dirs_exist_ok=True)
 
 
+def find_checkpoint(run_dir: str | Path, inputs: Path = KAGGLE_INPUT) -> Path:
+    """The trained generator (generator_ema.pt) of a run, wherever it is: the
+    run folder itself, a training version attached as input (runs/<name>/), or
+    any attached input holding one (e.g. a dataset someone shared)."""
+    run_dir = Path(run_dir)
+    if (run_dir / "generator_ema.pt").exists():
+        return run_dir / "generator_ema.pt"
+    hits = find_inputs(f"runs/{run_dir.name}/generator_ema.pt", inputs) or find_inputs("generator_ema.pt", inputs)
+    if not hits:
+        raise FileNotFoundError(
+            f"No generator_ema.pt for run '{run_dir.name}': not in {run_dir}, and no attached input has one. "
+            "Attach the finished 03_train version (or a dataset holding its run folder) with Add Input.\n"
+            "Attached inputs right now:\n" + describe_inputs(inputs))
+    if len(hits) > 1:
+        print("several generator_ema.pt found, using the first:\n  " + "\n  ".join(map(str, hits)))
+    return hits[0]
+
+
 def prepare(*, data: bool = True, gpu: bool = True,
             requirements: tuple[str, ...] = ("requirements.txt",)) -> tuple[Path, Path | None]:
     """Set up this runtime. Returns (results root, prepared data folder or None)."""

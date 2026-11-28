@@ -385,6 +385,65 @@ def test_edit_check_runs(cfg, dataset, tmp_path, monkeypatch):
     assert (df[~same].lpips_vs_clean_edit > 0).all()
     assert df[df.has_face].id_cos.notna().all() and df[~df.has_face].id_cos.isna().all()
     assert (out / "grid_64.png").exists() and (out / "grid_128.png").exists()
+    # Upscaled 256->128 here (no images_128/): not native. random8 and the 64 px size always are.
+    assert not df[(df["size"] == 128) & (df.method == "pgd8")].native.any()
+    assert df[df.method == "random8"].native.all() and df[df["size"] == 64].native.all()
+    assert "pink hair" in json.loads((out / "settings.json").read_text())["prompt_texts"]["ffhq"]
+
+
+def test_generator_eval_and_native_edit_check(cfg, dataset, tmp_path, monkeypatch):
+    from soteria.eval import generator as gen_eval
+    run = tmp_path / "runs" / "base_256"
+    run.mkdir(parents=True)
+    G = CloakGenerator(8 / 255, pretrained=False)
+    nn.init.normal_(G.net.segmentation_head[0].weight, std=1.0)     # a visible cloak, not ~0
+    torch.save({"state_dict": G.state_dict(), "eps": 8 / 255, "step": 123}, run / "generator_ema.pt")
+    (run / "config.json").write_text(json.dumps({"mask_min": 0.3}))
+    monkeypatch.setattr(gen_eval, "load_surrogates", tiny_surrogates)
+    monkeypatch.setattr(gen_eval, "load_lpips", lambda device: TinyLPIPS().to(device))
+    out = tmp_path / "eval"
+    gen_eval.main(["--checkpoint", str(rt.find_checkpoint(run)), "--out", str(out), "--config", "",
+                   f"data_root={str(dataset)!r}", "image_size=64", "num_workers=0",
+                   "--batch", "2", "--edit-n", "2", "--edit-sizes", "128", "--speed", "64x1", "--speed-reps", "1"])
+    df = pd.read_csv(out / "metrics.csv")
+    assert len(df) == 2 * 2 and set(df.method) == {"clean", "generator"}
+    for cond in ("none", "jpeg90", "jpeg75", "jpeg50", "resize50", "platform"):
+        assert f"{cond}/tiny_vae_ratio" in df and f"{cond}/tiny_clip_cos" in df
+    gen = df[df.method == "generator"]
+    assert (gen.linf_255 <= 8 + 1e-3).all() and (gen.linf_255 > 0.5).all()      # within budget, not empty
+    summary = pd.read_csv(out / "summary.csv", index_col=[0, 1])
+    assert ("generator", "all") in summary.index and ("clean", "ffhq") in summary.index
+    assert json.loads((out / "settings.json").read_text())["step"] == 123
+    assert json.loads((out / "speed.json").read_text())["results"][0]["ms_per_image"] > 0
+    assert (out / "samples.png").exists()
+    assert len(list((out / "cloaks" / "images").glob("*.png"))) == 2
+    native = sorted((out / "cloaks" / "images_128").glob("*.png"))
+    assert len(native) == 2 and Image.open(native[0]).size == (128, 128)
+
+    # The notebook's next cell: the edit check picks up the 128 px cloaks as native.
+    monkeypatch.setattr(edit, "load_editor", lambda device: FakeEditor())
+    monkeypatch.setattr(edit, "load_surrogates", tiny_surrogates)
+    monkeypatch.setattr(edit, "load_lpips", lambda device: TinyLPIPS().to(device))
+    edit.main(["--config", "", f"data_root={str(dataset)!r}", "image_size=64", "num_workers=0",
+               "--pgd-root", str(tmp_path / "pgd"), "--runs", f"generator={out / 'cloaks'}",
+               "--sizes", "64", "128", "--out", str(out / "edit_check")])
+    ed = pd.read_csv(out / "edit_check" / "metrics.csv")
+    assert ed[ed.method == "generator"].native.all()
+    assert (ed[ed.method == "generator"].lpips_vs_clean_edit > 0).all()
+
+
+def test_find_checkpoint(tmp_path):
+    inputs = tmp_path / "input"
+    with pytest.raises(FileNotFoundError, match="generator_ema.pt"):
+        rt.find_checkpoint(tmp_path / "runs" / "base_256", inputs)
+    shared = inputs / "datasets" / "friend" / "soteria-trained" / "soteria" / "runs" / "base_256"
+    shared.mkdir(parents=True)
+    (shared / "generator_ema.pt").write_bytes(b"g")
+    assert rt.find_checkpoint(tmp_path / "runs" / "base_256", inputs) == shared / "generator_ema.pt"
+    local = tmp_path / "runs" / "base_256"
+    local.mkdir(parents=True)
+    (local / "generator_ema.pt").write_bytes(b"mine")
+    assert rt.find_checkpoint(local, inputs) == local / "generator_ema.pt"          # own run folder first
 
 
 def test_notebook_cells_are_valid_python():

@@ -16,6 +16,7 @@ round trips. Proposal: `i233012_i233018_Project_Proposal.pdf`.
 | `colab/02_pgd.ipynb` | surrogate sanity checks, PGD baseline at 8/255 and 16/255 (the go/no-go gate), VAE ablation, SD1.5 img2img edit check | ~2.5 h + 50 min + 30 min (edit check alone: ~1 h if it must make its own cloaks) |
 | `colab/02b_edit_check.ipynb` | the edit check alone, for Kaggle "Save & Run All" (runs in the background, output kept) | ~1–1.5 h |
 | `colab/03_train.ipynb` | 300-step smoke run (measures speed, projects the main run), progress viewer, main 18k-step run at batch 8 (resumable) | ~20 min + ~10 GPU-h (measured: 4.05 img/s on a T4) |
+| `colab/04_eval.ipynb` | trained generator: protection + quality on all 400 eval images under 6 post-processing conditions, speed, and the SD edit check with cloaks made at 512 px | ~1 h |
 
 Every code cell is self-contained: it detects Colab or Kaggle, pulls the
 code, installs requirements and finds or unpacks the data (seconds when
@@ -51,6 +52,7 @@ soteria/
   infer.py        cloak one photo at any size (optionally pre-resized to the platform size)
   runtime.py      notebook setup for Colab and Kaggle, shared by every cell
   eval/edit.py    SD1.5 img2img edit check: clean vs cloaked edits, same seed, with controls
+  eval/generator.py  trained-generator evaluation: protection, quality, speed, native-size cloaks
 configs/          base_256.yaml, smoke.yaml, pgd.yaml
 scripts/          prepare_data.py, check_surrogates.py
 tests/            CPU smoke tests with tiny stand-in surrogates (no downloads)
