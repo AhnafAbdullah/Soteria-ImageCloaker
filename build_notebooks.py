@@ -293,7 +293,7 @@ TRAIN_SETTINGS = r'''
 # ---- this run ----------------------------------------------------------------
 RUN_NAME  = "base_256"     # one folder per experiment AND per person, e.g. "ahnaf_base_256"
 CONFIG    = "configs/base_256.yaml"
-OVERRIDES = ""             # e.g. "clip_floor=0.3 face_floor=-0.1 w_vae=4". Must not change
+OVERRIDES = ""             # changes on top of CONFIG (which already has the rebalanced loss). Must not change
                            # while resuming one RUN_NAME: train.py refuses a mismatch.
 OUT = ROOT / "runs" / RUN_NAME
 rt.restore_run(OUT)        # Kaggle: continue from an earlier saved version attached as input
@@ -379,7 +379,7 @@ if RUN_SMOKE:
     cell(PROGRESS, data=False, gpu=False, requirements=()),
     cell(TRAIN_SETTINGS + r'''
 RUN_MAIN   = False         # set True to train (Kaggle "Save & Run All" runs every cell)
-STEPS      = 20000         # total steps for the whole run; size it from the smoke run's suggestion.
+STEPS      = 18000         # total steps (batch 8): ~10 h on a T4, one Kaggle session. Size it from the smoke run.
                            # Set it before the first session: the LR schedule is built from it.
 BUDGET_MIN = rt.session_budget_min()   # training minutes in THIS session. Kaggle: all that is left
                            # of the 12 h session limit minus 30 min, so the run stops itself and is saved

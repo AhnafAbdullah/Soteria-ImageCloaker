@@ -1,4 +1,6 @@
-# First real run: 256 px, one surrogate per family, ~4-6 h on a Colab T4.
+# Main run: 256 px, one surrogate per family, rebalanced loss.
+# Sized for one Kaggle T4 session: the smoke run measured 4.05 img/s, so
+# 18000 steps x 8 images ~ 10 h, inside the ~11.3 h a session leaves for training.
 image_size: 256
 eps: 0.03137          # 8/255
 mask_min: 0.3
@@ -8,14 +10,21 @@ clip: [vit_b16_laion]
 face: [arcface_ir101]
 ghost_std: 0.03
 
-w_vae: 1.0
+# Rebalanced (02_pgd ablation): CLIP / face stop pulling once past an unrelated
+# image / a stranger (surrogate check: 0.425 / -0.002), and the VAE gets 4x weight.
+# PGD at 8/255: VAE ratio 0.894 -> 0.813 after JPEG, face stays broken (0.06).
+w_vae: 4.0
 w_clip: 1.0
 w_face: 1.0
+clip_floor: 0.3
+face_floor: -0.1
 w_lpips: 10.0
 lpips_budget: 0.05
 
-batch_size: 16
-steps: 20000
+# Batch 16 runs out of memory on a 15 GB T4 (fp32 VAE encoder + CLIP + ArcFace
+# + LPIPS, all with gradients); 8 fits and gives the same images per second.
+batch_size: 8
+steps: 18000
 lr: 2.0e-4
 warmup_steps: 500
 curriculum_frac: 0.2
@@ -23,7 +32,7 @@ curriculum_frac: 0.2
 log_every: 50
 val_every: 500
 ckpt_every: 500
-budget_min: 330       # stop cleanly before a 6 h Colab session ends
+budget_min: 330       # Colab default; the notebooks pass the session's own budget
 
 data_root: /content/data/prepared
 out_dir: /content/drive/MyDrive/soteria/runs/base_256
